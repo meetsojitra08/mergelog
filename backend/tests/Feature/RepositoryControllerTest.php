@@ -116,6 +116,24 @@ class RepositoryControllerTest extends TestCase
         $this->assertDatabaseHas('repositories', ['id' => $repository->id, 'user_id' => $owner->id]);
     }
 
+    public function test_non_digit_repository_ids_return_404_for_show_and_delete(): void
+    {
+        $owner = User::factory()->create();
+        $repository = Repository::factory()->for($owner)->create();
+
+        foreach (['not-a-number', $repository->id.'e0'] as $invalidId) {
+            $this->actingAs($owner, 'sanctum')
+                ->getJson('/api/repositories/'.$invalidId)
+                ->assertNotFound();
+
+            $this->actingAs($owner, 'sanctum')
+                ->deleteJson('/api/repositories/'.$invalidId)
+                ->assertNotFound();
+        }
+
+        $this->assertDatabaseHas('repositories', ['id' => $repository->id, 'user_id' => $owner->id]);
+    }
+
     public function test_repository_name_must_be_unique_per_user(): void
     {
         $owner = User::factory()->create();
