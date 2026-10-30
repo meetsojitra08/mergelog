@@ -169,4 +169,10 @@ class RepositoryControllerTest extends TestCase
         $this->getJson('/api/repositories')->assertUnauthorized();
         $this->postJson('/api/repositories', ['full_name' => 'octocat/hello-world'])->assertUnauthorized();
     }
+
+    public function test_non_numeric_repository_ids_return_404_before_authentication(): void
+    {
+        $this->getJson('/api/repositories/not-a-number')->assertNotFound();
+        $this->deleteJson('/api/repositories/not-a-number')->assertNotFound();
+    }
 }

@@ -15,6 +15,6 @@ Route::middleware('auth:sanctum')->group(function (): void {
 
     Route::get('/repositories', [RepositoryController::class, 'index'])->name('repositories.index');
     Route::post('/repositories', [RepositoryController::class, 'store'])->name('repositories.store');
-    Route::get('/repositories/{repository}', [RepositoryController::class, 'show'])->name('repositories.show');
-    Route::delete('/repositories/{repository}', [RepositoryController::class, 'destroy'])->name('repositories.destroy');
+    Route::get('/repositories/{repository}', [RepositoryController::class, 'show'])->whereNumber('repository')->name('repositories.show');
+    Route::delete('/repositories/{repository}', [RepositoryController::class, 'destroy'])->whereNumber('repository')->name('repositories.destroy');
 });
