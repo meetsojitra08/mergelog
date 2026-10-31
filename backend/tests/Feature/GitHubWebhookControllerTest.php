@@ -6,8 +6,12 @@ use App\Enums\ChangeEntryStatus;
 use App\Models\ChangeEntry;
 use App\Models\PullRequest;
 use App\Models\Repository;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Exceptions;
+use Illuminate\Support\Facades\Schema;
+use RuntimeException;
 use Tests\TestCase;
 
 class GitHubWebhookControllerTest extends TestCase
@@ -57,6 +61,85 @@ class GitHubWebhookControllerTest extends TestCase
     public function test_unknown_repository_returns_404(): void
     {
         $this->postJson('/api/webhooks/github/999999', [])->assertNotFound();
+    }
+
+    public function test_invalid_repository_ids_are_rejected_before_a_repository_query(): void
+    {
+        $queries = [];
+        DB::listen(function (QueryExecuted $query) use (&$queries): void {
+            $queries[] = $query->sql;
+        });
+
+        foreach (['abc', '-1', '9223372036854775808', '1000000000000000000000000'] as $id) {
+            $this->postJson('/api/webhooks/github/'.$id, [])->assertNotFound();
+        }
+
+        $this->assertSame([], $queries);
+    }
+
+    public function test_maximum_repository_id_is_queried_and_leading_zeroes_preserve_valid_ids(): void
+    {
+        $repository = Repository::factory()->create();
+        $queries = [];
+        DB::listen(function (QueryExecuted $query) use (&$queries): void {
+            $queries[] = $query->bindings;
+        });
+
+        $this->postJson('/api/webhooks/github/9223372036854775807', [])->assertNotFound();
+        $this->assertContains(['9223372036854775807'], $queries);
+
+        $this->postJson('/api/webhooks/github/000'.$repository->id, [])->assertUnauthorized();
+    }
+
+    public function test_decryption_failure_is_reported_without_the_secret_or_payload(): void
+    {
+        $repository = Repository::factory()->create();
+        DB::table('repositories')->where('id', $repository->id)->update(['webhook_secret' => 'invalid-ciphertext']);
+        Exceptions::fake();
+
+        $this->postJson('/api/webhooks/github/'.$repository->id, ['sensitive' => 'payload-marker'])
+            ->assertStatus(500)
+            ->assertJson(['message' => 'Unable to process webhook.']);
+
+        Exceptions::assertReported(fn (RuntimeException $exception): bool => str_contains($exception->getMessage(), 'DecryptException')
+            && ! str_contains($exception->getMessage(), 'invalid-ciphertext')
+            && ! str_contains($exception->getMessage(), 'payload-marker')
+            && $exception->getPrevious() === null
+        );
+    }
+
+    public function test_database_failure_is_reported_without_payload_and_rolls_back(): void
+    {
+        $repository = Repository::factory()->create();
+        Schema::drop('change_entries');
+        Exceptions::fake();
+        $payload = $this->mergedPullRequestPayload();
+        $payload['pull_request']['body'] = 'payload-marker';
+
+        $this->sendWebhook($repository, $payload)->assertStatus(500)
+            ->assertJson(['message' => 'Unable to process webhook.']);
+
+        Exceptions::assertReported(fn (RuntimeException $exception): bool => str_contains($exception->getMessage(), 'QueryException')
+            && ! str_contains($exception->getMessage(), 'payload-marker')
+            && ! str_contains($exception->getMessage(), $repository->webhook_secret)
+            && $exception->getPrevious() === null
+        );
+        $this->assertDatabaseCount('pull_requests', 0);
+    }
+
+    public function test_long_url_is_stored_up_to_the_validation_limit(): void
+    {
+        $repository = Repository::factory()->create();
+        $payload = $this->mergedPullRequestPayload();
+        $prefix = 'https://example.com/';
+        $payload['pull_request']['html_url'] = $prefix.str_repeat('a', 2048 - strlen($prefix));
+
+        $this->sendWebhook($repository, $payload)->assertStatus(202);
+        $this->assertSame($payload['pull_request']['html_url'], PullRequest::query()->sole()->html_url);
+        if (DB::getDriverName() === 'pgsql') {
+            $column = collect(Schema::getColumns('pull_requests'))->firstWhere('name', 'html_url');
+            $this->assertSame('character varying(2048)', $column['type']);
+        }
     }
 
     public function test_invalid_json_returns_400_after_signature_verification(): void

@@ -15,7 +15,7 @@ return new class extends Migration
             $table->string('title');
             $table->text('body')->nullable();
             $table->string('author');
-            $table->string('html_url');
+            $table->string('html_url', 2048);
             $table->timestamp('merged_at');
             $table->string('github_delivery_id')->unique();
             $table->timestamps();

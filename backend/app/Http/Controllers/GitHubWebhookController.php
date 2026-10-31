@@ -10,12 +10,20 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use JsonException;
+use RuntimeException;
 use Throwable;
 
 class GitHubWebhookController extends Controller
 {
     public function __invoke(Request $request, string $repository): JsonResponse
     {
+        $repository = ltrim($repository, '0') ?: '0';
+        $maxId = '9223372036854775807';
+
+        if (strlen($repository) > strlen($maxId) || (strlen($repository) === strlen($maxId) && strcmp($repository, $maxId) > 0)) {
+            return response()->json(['message' => 'Repository not found.'], 404);
+        }
+
         $repository = Repository::query()->find($repository);
 
         if ($repository === null) {
@@ -27,7 +35,9 @@ class GitHubWebhookController extends Controller
 
         try {
             $expectedSignature = 'sha256='.hash_hmac('sha256', $rawBody, $repository->webhook_secret);
-        } catch (Throwable) {
+        } catch (Throwable $exception) {
+            $this->reportFailure($exception);
+
             return response()->json(['message' => 'Unable to process webhook.'], 500);
         }
 
@@ -108,7 +118,9 @@ class GitHubWebhookController extends Controller
 
                 return true;
             });
-        } catch (Throwable) {
+        } catch (Throwable $exception) {
+            $this->reportFailure($exception);
+
             return response()->json(['message' => 'Unable to process webhook.'], 500);
         }
 
@@ -116,5 +128,15 @@ class GitHubWebhookController extends Controller
             ['message' => $created ? 'Pull request accepted.' : 'Webhook already processed.'],
             $created ? 202 : 200,
         );
+    }
+
+    private function reportFailure(Throwable $exception): void
+    {
+        report(new RuntimeException(sprintf(
+            'Webhook processing failed: %s at %s:%d',
+            $exception::class,
+            $exception->getFile(),
+            $exception->getLine(),
+        )));
     }
 }

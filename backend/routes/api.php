@@ -6,6 +6,7 @@ use App\Http\Controllers\RepositoryController;
 use Illuminate\Support\Facades\Route;
 
 Route::post('/webhooks/github/{repository}', GitHubWebhookController::class)
+    ->whereNumber('repository')
     ->name('webhooks.github');
 
 Route::post('/register', [AuthController::class, 'register'])->name('register');
