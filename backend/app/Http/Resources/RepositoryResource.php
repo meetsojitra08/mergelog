@@ -18,8 +18,8 @@ class RepositoryResource extends JsonResource
             return [
                 'id' => $this->id,
                 'full_name' => $this->full_name,
-                'pending_count' => 0,
-                'drafted_count' => 0,
+                'pending_count' => $this->pending_count,
+                'drafted_count' => $this->drafted_count,
                 'created_at' => $this->created_at,
             ];
         }

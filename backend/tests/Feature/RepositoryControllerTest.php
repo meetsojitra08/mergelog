@@ -2,6 +2,9 @@
 
 namespace Tests\Feature;
 
+use App\Enums\ChangeEntryStatus;
+use App\Models\ChangeEntry;
+use App\Models\PullRequest;
 use App\Models\Repository;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -49,6 +52,18 @@ class RepositoryControllerTest extends TestCase
             'webhook_secret' => 'list-secret',
             'github_token' => 'ghp-list-private-token',
         ]);
+        $pendingPullRequest = PullRequest::factory()->for($repository)->create();
+        ChangeEntry::factory()->for($pendingPullRequest, 'pullRequest')->create([
+            'status' => ChangeEntryStatus::PendingAi,
+        ]);
+        $draftedPullRequest = PullRequest::factory()->for($repository)->create();
+        ChangeEntry::factory()->for($draftedPullRequest, 'pullRequest')->create([
+            'status' => ChangeEntryStatus::Drafted,
+        ]);
+        $failedPullRequest = PullRequest::factory()->for($repository)->create();
+        ChangeEntry::factory()->for($failedPullRequest, 'pullRequest')->create([
+            'status' => ChangeEntryStatus::Failed,
+        ]);
         Repository::factory()->for($otherUser)->create(['full_name' => 'other/private']);
 
         $this->actingAs($owner, 'sanctum')
@@ -57,8 +72,8 @@ class RepositoryControllerTest extends TestCase
             ->assertJsonCount(1)
             ->assertJsonStructure([['id', 'full_name', 'pending_count', 'drafted_count', 'created_at']])
             ->assertJsonPath('0.id', $repository->id)
-            ->assertJsonPath('0.pending_count', 0)
-            ->assertJsonPath('0.drafted_count', 0)
+            ->assertJsonPath('0.pending_count', 1)
+            ->assertJsonPath('0.drafted_count', 1)
             ->assertJsonMissingPath('0.webhook_secret')
             ->assertJsonMissingPath('0.github_token')
             ->assertDontSee('list-secret')

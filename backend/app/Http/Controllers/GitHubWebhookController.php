@@ -3,7 +3,9 @@
 namespace App\Http\Controllers;
 
 use App\Enums\ChangeEntryStatus;
+use App\Jobs\SummarizePullRequest;
 use App\Models\ChangeEntry;
+use App\Models\PullRequest;
 use App\Models\Repository;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -89,7 +91,7 @@ class GitHubWebhookController extends Controller
         $pullRequest = $payload['pull_request'];
 
         try {
-            $created = DB::transaction(function () use ($repository, $pullRequest, $deliveryId): bool {
+            $createdPullRequest = DB::transaction(function () use ($repository, $pullRequest, $deliveryId): ?int {
                 $inserted = DB::table('pull_requests')->insertOrIgnore([
                     'repository_id' => $repository->id,
                     'github_pr_number' => $pullRequest['number'],
@@ -104,7 +106,7 @@ class GitHubWebhookController extends Controller
                 ]);
 
                 if ($inserted === 0) {
-                    return false;
+                    return null;
                 }
 
                 $pullRequestId = DB::table('pull_requests')
@@ -116,17 +118,35 @@ class GitHubWebhookController extends Controller
                     'status' => ChangeEntryStatus::PendingAi,
                 ]);
 
-                return true;
+                return (int) $pullRequestId;
             });
+
+            $pullRequestForJob = $createdPullRequest !== null
+                ? PullRequest::query()->findOrFail($createdPullRequest)
+                : null;
         } catch (Throwable $exception) {
             $this->reportFailure($exception);
 
             return response()->json(['message' => 'Unable to process webhook.'], 500);
         }
 
+        if ($pullRequestForJob !== null) {
+            try {
+                SummarizePullRequest::dispatch($pullRequestForJob);
+            } catch (Throwable $exception) {
+                ChangeEntry::query()->where('pull_request_id', $createdPullRequest)
+                    ->where('status', ChangeEntryStatus::PendingAi)
+                    ->update([
+                        'status' => ChangeEntryStatus::Failed,
+                        'error_message' => 'Unable to queue summary.',
+                    ]);
+                $this->reportFailure($exception);
+            }
+        }
+
         return response()->json(
-            ['message' => $created ? 'Pull request accepted.' : 'Webhook already processed.'],
-            $created ? 202 : 200,
+            ['message' => $createdPullRequest !== null ? 'Pull request accepted.' : 'Webhook already processed.'],
+            $createdPullRequest !== null ? 202 : 200,
         );
     }
 
