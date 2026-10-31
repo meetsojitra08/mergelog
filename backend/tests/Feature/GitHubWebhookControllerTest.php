@@ -10,6 +10,7 @@ use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Exceptions;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Schema;
 use RuntimeException;
 use Tests\TestCase;
@@ -21,6 +22,7 @@ class GitHubWebhookControllerTest extends TestCase
     public function test_valid_signature_for_a_merged_pull_request_stores_one_pull_request_and_entry(): void
     {
         $repository = Repository::factory()->create(['webhook_secret' => 'repository-secret']);
+        Queue::fake();
 
         $this->sendWebhook($repository, $this->mergedPullRequestPayload())
             ->assertStatus(202);
@@ -35,6 +37,7 @@ class GitHubWebhookControllerTest extends TestCase
         $this->assertSame('octocat', $pullRequest->author);
         $this->assertSame('delivery-123', $pullRequest->github_delivery_id);
         $this->assertSame(ChangeEntryStatus::PendingAi, ChangeEntry::query()->sole()->status);
+        Queue::assertNothingPushed();
     }
 
     public function test_invalid_signature_returns_401_and_stores_nothing(): void
@@ -176,6 +179,19 @@ class GitHubWebhookControllerTest extends TestCase
         $this->assertDatabaseCount('pull_requests', 0);
     }
 
+    public function test_closed_but_not_merged_pull_request_is_acknowledged_without_storage(): void
+    {
+        $repository = Repository::factory()->create();
+        $payload = $this->mergedPullRequestPayload();
+        $payload['pull_request']['merged'] = false;
+        $payload['pull_request']['merged_at'] = null;
+
+        $this->sendWebhook($repository, $payload)->assertOk();
+
+        $this->assertDatabaseCount('pull_requests', 0);
+        $this->assertDatabaseCount('change_entries', 0);
+    }
+
     public function test_closed_and_merged_pull_request_is_accepted(): void
     {
         $repository = Repository::factory()->create();
@@ -258,7 +274,7 @@ class GitHubWebhookControllerTest extends TestCase
         ?string $signatureSecret = null,
         bool $includeSignature = true,
     ) {
-        $rawBody = json_encode($payload, JSON_THROW_ON_ERROR);
+        $rawBody = json_encode($payload, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR);
 
         return $this->sendRawWebhook(
             $repository,

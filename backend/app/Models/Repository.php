@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 #[Fillable(['full_name', 'webhook_secret', 'github_token'])]
 #[Hidden(['webhook_secret', 'github_token'])]
@@ -27,5 +28,10 @@ class Repository extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function pullRequests(): HasMany
+    {
+        return $this->hasMany(PullRequest::class);
     }
 }
