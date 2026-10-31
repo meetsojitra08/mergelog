@@ -4,6 +4,7 @@ namespace Database\Factories;
 
 use App\Models\PullRequest;
 use App\Models\Repository;
+use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -14,7 +15,16 @@ class PullRequestFactory extends Factory
     /**
      * Define the model's default state.
      *
-     * @return array<string, mixed>
+     * @return array{
+     *     repository_id: RepositoryFactory,
+     *     github_pr_number: int,
+     *     title: string,
+     *     body: string,
+     *     author: string,
+     *     html_url: string,
+     *     merged_at: CarbonInterface,
+     *     github_delivery_id: string
+     * }
      */
     public function definition(): array
     {

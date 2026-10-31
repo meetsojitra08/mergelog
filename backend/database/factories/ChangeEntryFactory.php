@@ -15,7 +15,14 @@ class ChangeEntryFactory extends Factory
     /**
      * Define the model's default state.
      *
-     * @return array<string, mixed>
+     * @return array{
+     *     pull_request_id: PullRequestFactory,
+     *     category: null,
+     *     summary: null,
+     *     status: ChangeEntryStatus,
+     *     ai_raw_response: null,
+     *     error_message: null
+     * }
      */
     public function definition(): array
     {

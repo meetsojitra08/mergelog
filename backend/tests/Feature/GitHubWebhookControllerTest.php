@@ -111,7 +111,9 @@ class GitHubWebhookControllerTest extends TestCase
     public function test_database_failure_is_reported_without_payload_and_rolls_back(): void
     {
         $repository = Repository::factory()->create();
-        Schema::drop('change_entries');
+        ChangeEntry::creating(function (ChangeEntry $entry): void {
+            $entry->status = null;
+        });
         Exceptions::fake();
         $payload = $this->mergedPullRequestPayload();
         $payload['pull_request']['body'] = 'payload-marker';
