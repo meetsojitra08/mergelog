@@ -3,13 +3,16 @@
 namespace Tests\Feature;
 
 use App\Enums\ChangeEntryStatus;
+use App\Jobs\SummarizePullRequest;
 use App\Models\ChangeEntry;
 use App\Models\PullRequest;
 use App\Models\Repository;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Exceptions;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Schema;
 use RuntimeException;
 use Tests\TestCase;
@@ -21,6 +24,7 @@ class GitHubWebhookControllerTest extends TestCase
     public function test_valid_signature_for_a_merged_pull_request_stores_one_pull_request_and_entry(): void
     {
         $repository = Repository::factory()->create(['webhook_secret' => 'repository-secret']);
+        Queue::fake();
 
         $this->sendWebhook($repository, $this->mergedPullRequestPayload())
             ->assertStatus(202);
@@ -35,6 +39,7 @@ class GitHubWebhookControllerTest extends TestCase
         $this->assertSame('octocat', $pullRequest->author);
         $this->assertSame('delivery-123', $pullRequest->github_delivery_id);
         $this->assertSame(ChangeEntryStatus::PendingAi, ChangeEntry::query()->sole()->status);
+        Queue::assertPushed(SummarizePullRequest::class, 1);
     }
 
     public function test_invalid_signature_returns_401_and_stores_nothing(): void
@@ -132,6 +137,7 @@ class GitHubWebhookControllerTest extends TestCase
     public function test_long_url_is_stored_up_to_the_validation_limit(): void
     {
         $repository = Repository::factory()->create();
+        Queue::fake();
         $payload = $this->mergedPullRequestPayload();
         $prefix = 'https://example.com/';
         $payload['pull_request']['html_url'] = $prefix.str_repeat('a', 2048 - strlen($prefix));
@@ -176,9 +182,23 @@ class GitHubWebhookControllerTest extends TestCase
         $this->assertDatabaseCount('pull_requests', 0);
     }
 
+    public function test_closed_but_not_merged_pull_request_is_acknowledged_without_storage(): void
+    {
+        $repository = Repository::factory()->create();
+        $payload = $this->mergedPullRequestPayload();
+        $payload['pull_request']['merged'] = false;
+        $payload['pull_request']['merged_at'] = null;
+
+        $this->sendWebhook($repository, $payload)->assertOk();
+
+        $this->assertDatabaseCount('pull_requests', 0);
+        $this->assertDatabaseCount('change_entries', 0);
+    }
+
     public function test_closed_and_merged_pull_request_is_accepted(): void
     {
         $repository = Repository::factory()->create();
+        Queue::fake();
 
         $this->sendWebhook($repository, $this->mergedPullRequestPayload())->assertStatus(202);
 
@@ -193,6 +213,7 @@ class GitHubWebhookControllerTest extends TestCase
     public function test_duplicate_delivery_is_acknowledged_without_duplicate_rows(): void
     {
         $repository = Repository::factory()->create();
+        Queue::fake();
         $payload = $this->mergedPullRequestPayload();
 
         $this->sendWebhook($repository, $payload)->assertStatus(202);
@@ -200,6 +221,25 @@ class GitHubWebhookControllerTest extends TestCase
 
         $this->assertDatabaseCount('pull_requests', 1);
         $this->assertDatabaseCount('change_entries', 1);
+    }
+
+    public function test_dispatch_failure_marks_entry_failed_and_duplicate_delivery_remains_acknowledged(): void
+    {
+        $repository = Repository::factory()->create();
+        Bus::shouldReceive('dispatch')->once()->andThrow(new RuntimeException('queue unavailable'));
+        Exceptions::fake();
+        $payload = $this->mergedPullRequestPayload();
+
+        $this->sendWebhook($repository, $payload)->assertStatus(202);
+        $entry = ChangeEntry::query()->sole();
+        $this->assertSame(ChangeEntryStatus::Failed, $entry->status);
+        $this->assertSame('Unable to queue summary.', $entry->error_message);
+        Exceptions::assertReported(fn (RuntimeException $exception): bool => str_contains($exception->getMessage(), 'Webhook processing failed: RuntimeException'));
+
+        $this->sendWebhook($repository, $payload)->assertOk();
+        $this->assertDatabaseCount('pull_requests', 1);
+        $this->assertDatabaseCount('change_entries', 1);
+        $this->assertSame(ChangeEntryStatus::Failed, $entry->fresh()->status);
     }
 
     public function test_missing_required_pull_request_fields_returns_422(): void
@@ -219,6 +259,7 @@ class GitHubWebhookControllerTest extends TestCase
     {
         $secret = 'encrypted-webhook-secret';
         $repository = Repository::factory()->create(['webhook_secret' => $secret]);
+        Queue::fake();
         $storedSecret = DB::table('repositories')->where('id', $repository->id)->value('webhook_secret');
 
         $this->assertNotSame($secret, $storedSecret);
@@ -258,7 +299,7 @@ class GitHubWebhookControllerTest extends TestCase
         ?string $signatureSecret = null,
         bool $includeSignature = true,
     ) {
-        $rawBody = json_encode($payload, JSON_THROW_ON_ERROR);
+        $rawBody = json_encode($payload, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR);
 
         return $this->sendRawWebhook(
             $repository,
