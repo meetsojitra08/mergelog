@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { api, ApiError } from './api';
 import type { User } from './types';
 
@@ -18,9 +18,15 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('mergelog_token'));
   const [user, setUser] = useState<User | null>(null);
+  const currentUser = useRef<User | null>(null);
   const [loading, setLoading] = useState(Boolean(token));
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
+
+  function updateUser(nextUser: User | null): void {
+    currentUser.current = nextUser;
+    setUser(nextUser);
+  }
 
   useEffect(() => {
     if (!token) {
@@ -34,15 +40,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setSessionError(null);
     api.me(token)
       .then((currentUser) => {
-        if (active) setUser(currentUser);
+        if (active) updateUser(currentUser);
       })
       .catch((reason: unknown) => {
         if (active) {
           if (reason instanceof ApiError && reason.status === 401) {
             localStorage.removeItem('mergelog_token');
             setToken(null);
-            setUser(null);
-          } else {
+            updateUser(null);
+          } else if (!currentUser.current) {
             setSessionError('Unable to verify your session. Please try again.');
           }
         }
@@ -64,7 +70,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const result = await api.login(email, password);
     localStorage.setItem('mergelog_token', result.token);
     setToken(result.token);
-    setUser(result.user);
+    updateUser(result.user);
   }
 
   async function register(name: string, email: string, password: string, confirmation: string): Promise<void> {
@@ -76,14 +82,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
     localStorage.setItem('mergelog_token', result.token);
     setToken(result.token);
-    setUser(result.user);
+    updateUser(result.user);
   }
 
   async function logout(): Promise<void> {
     const currentToken = token;
     localStorage.removeItem('mergelog_token');
     setToken(null);
-    setUser(null);
+    updateUser(null);
     if (currentToken) {
       try {
         await api.logout(currentToken);

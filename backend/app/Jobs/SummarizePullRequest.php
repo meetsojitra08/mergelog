@@ -21,6 +21,8 @@ class SummarizePullRequest implements ShouldQueue
 
     public int $tries = 3;
 
+    public int $timeout = 60;
+
     public function __construct(public PullRequest $pullRequest) {}
 
     /**
