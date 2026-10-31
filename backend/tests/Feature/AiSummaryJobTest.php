@@ -104,6 +104,24 @@ class AiSummaryJobTest extends TestCase
         $this->assertSame('AI provider request failed with HTTP status 503.', $entry->error_message);
     }
 
+    public function test_stale_failure_callback_does_not_overwrite_a_drafted_entry(): void
+    {
+        $entry = $this->pendingEntry();
+        $job = new SummarizePullRequest($entry->pullRequest);
+        $entry->update([
+            'status' => ChangeEntryStatus::Drafted,
+            'summary' => 'A completed summary.',
+            'error_message' => null,
+        ]);
+
+        $job->failed(new RuntimeException('Late failure'));
+
+        $entry->refresh();
+        $this->assertSame(ChangeEntryStatus::Drafted, $entry->status);
+        $this->assertSame('A completed summary.', $entry->summary);
+        $this->assertNull($entry->error_message);
+    }
+
     public function test_github_file_lookup_failure_does_not_block_ai_summary(): void
     {
         $entry = $this->pendingEntry();

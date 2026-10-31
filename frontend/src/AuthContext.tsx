@@ -1,11 +1,13 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
-import { api } from './api';
+import { api, ApiError } from './api';
 import type { User } from './types';
 
 interface AuthContextValue {
   token: string | null;
   user: User | null;
   loading: boolean;
+  sessionError: string | null;
+  retrySession: () => void;
   login: (email: string, password: string) => Promise<void>;
   register: (name: string, email: string, password: string, confirmation: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -17,23 +19,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('mergelog_token'));
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(Boolean(token));
+  const [sessionError, setSessionError] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
 
   useEffect(() => {
     if (!token) {
       setLoading(false);
+      setSessionError(null);
       return;
     }
 
     let active = true;
+    setLoading(true);
+    setSessionError(null);
     api.me(token)
       .then((currentUser) => {
         if (active) setUser(currentUser);
       })
-      .catch(() => {
+      .catch((reason: unknown) => {
         if (active) {
-          localStorage.removeItem('mergelog_token');
-          setToken(null);
-          setUser(null);
+          if (reason instanceof ApiError && reason.status === 401) {
+            localStorage.removeItem('mergelog_token');
+            setToken(null);
+            setUser(null);
+          } else {
+            setSessionError('Unable to verify your session. Please try again.');
+          }
         }
       })
       .finally(() => {
@@ -41,7 +52,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
 
     return () => { active = false; };
-  }, [token]);
+  }, [token, retryCount]);
+
+  function retrySession(): void {
+    setLoading(true);
+    setSessionError(null);
+    setRetryCount((count) => count + 1);
+  }
 
   async function login(email: string, password: string): Promise<void> {
     const result = await api.login(email, password);
@@ -77,7 +94,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ token, user, loading, login, register, logout }}>
+    <AuthContext.Provider value={{ token, user, loading, sessionError, retrySession, login, register, logout }}>
       {children}
     </AuthContext.Provider>
   );

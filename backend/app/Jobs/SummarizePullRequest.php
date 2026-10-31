@@ -60,17 +60,12 @@ class SummarizePullRequest implements ShouldQueue
 
     public function failed(Throwable $exception): void
     {
-        $entry = ChangeEntry::query()
+        ChangeEntry::query()
             ->where('pull_request_id', $this->pullRequest->id)
-            ->first();
-
-        if ($entry === null) {
-            return;
-        }
-
-        $entry->fill([
-            'status' => ChangeEntryStatus::Failed,
-            'error_message' => $exception->getMessage(),
-        ])->save();
+            ->where('status', ChangeEntryStatus::PendingAi)
+            ->update([
+                'status' => ChangeEntryStatus::Failed,
+                'error_message' => $exception->getMessage(),
+            ]);
     }
 }
