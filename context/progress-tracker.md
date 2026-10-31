@@ -9,7 +9,7 @@ Update this file after finishing each feature. Work in order. Do not start a fea
 - [x] 01 Backend setup and auth (`context/feature-specs/01-backend-setup-and-auth.md`)
 - [x] 02 Repositories (`context/feature-specs/02-repositories.md`)
 - [x] 03 Webhook receiver (`context/feature-specs/03-webhook-receiver.md`)
-- [ ] 04 AI summary job (`context/feature-specs/04-ai-summary-job.md`)
+- [x] 04 AI summary job (`context/feature-specs/04-ai-summary-job.md`)
 - [ ] 05 Frontend setup, login, repositories page (`context/feature-specs/05-frontend-setup-login-repos.md`)
 - [ ] 06 Change entries page (`context/feature-specs/06-change-entries-page.md`)
 - [ ] 07 Draft release editor (`context/feature-specs/07-draft-release-editor.md`)
@@ -17,8 +17,8 @@ Update this file after finishing each feature. Work in order. Do not start a fea
 - [ ] 09 Testing and polish (`context/feature-specs/09-testing-and-polish.md`)
 
 ## Current focus
-Feature: 03 complete
-Next action: wait for direction before starting Feature 04 (AI summary job).
+Feature: 04 complete
+Next action: Feature 05 (frontend setup, login, repositories page).
 
 ## Notes per feature
 - Feature 01: Laravel 13.39 API with Sanctum 4.3 token authentication, PostgreSQL, and the database queue driver.
@@ -31,6 +31,8 @@ Next action: wait for direction before starting Feature 04 (AI summary job).
 - Feature 02 verification: focused tests passed with 11 tests and 72 assertions; full backend suite passed with 42 tests and 186 assertions. Pint and diff checks passed.
 - Feature 03: Added an unauthenticated, repository-secret-authenticated GitHub webhook endpoint, pull request and change entry schema/models, backed enums, payload validation, and duplicate-safe persistence. AI dispatch remains out of scope until Feature 04.
 - Feature 03 verification: 19 focused tests passed with 59 assertions, covering a signature over formatted raw JSON, valid and invalid signatures, duplicate deliveries, closed-but-not-merged PRs, ping, and no queued AI work. The full suite passed with 43 tests and 190 assertions; Pint and diff checks passed.
+- Feature 04: Added the Gemini-backed summarizer, GitHub changed-file lookup with an empty-list fallback, queued summary job with three tries and backoff, and authenticated retry endpoint for failed entries. AI output is validated before category and summary are saved; the original provider response is retained as jsonb.
+- Feature 04 verification: 26 focused AI job and webhook tests passed with 82 assertions. The full backend suite passed with 50 tests and 213 assertions; Pint passed.
 
 ## Decisions log
 | Date | Decision | Why |
@@ -46,6 +48,7 @@ Next action: wait for direction before starting Feature 04 (AI summary job).
 | 2026-11-01 | Repository list counts query pending and drafted entries through their pull requests | The API returns the current counts after Feature 03 introduced change entries |
 | 2026-10-31 | GitHub webhook signatures are checked against the routed repository's decrypted secret before payload handling | Prevents a repository ID alone or another repository's secret from authenticating an event |
 | 2026-10-31 | Pull request insertion and its pending change entry happen in one transaction, with unique delivery and repository/PR indexes | Retries and concurrent deliveries cannot create duplicate records or a PR without its entry |
+| 2026-11-01 | Gemini is the single AI provider; its endpoint, model, key header, and request/response format live in `SummarizerService` | Provider changes stay localized and do not add a dependency |
 
 ## Known issues / ideas for later
 - (empty)

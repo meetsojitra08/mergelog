@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Enums\ChangeEntryStatus;
+use App\Jobs\SummarizePullRequest;
 use App\Models\ChangeEntry;
 use App\Models\PullRequest;
 use App\Models\Repository;
@@ -37,7 +38,7 @@ class GitHubWebhookControllerTest extends TestCase
         $this->assertSame('octocat', $pullRequest->author);
         $this->assertSame('delivery-123', $pullRequest->github_delivery_id);
         $this->assertSame(ChangeEntryStatus::PendingAi, ChangeEntry::query()->sole()->status);
-        Queue::assertNothingPushed();
+        Queue::assertPushed(SummarizePullRequest::class, 1);
     }
 
     public function test_invalid_signature_returns_401_and_stores_nothing(): void
@@ -135,6 +136,7 @@ class GitHubWebhookControllerTest extends TestCase
     public function test_long_url_is_stored_up_to_the_validation_limit(): void
     {
         $repository = Repository::factory()->create();
+        Queue::fake();
         $payload = $this->mergedPullRequestPayload();
         $prefix = 'https://example.com/';
         $payload['pull_request']['html_url'] = $prefix.str_repeat('a', 2048 - strlen($prefix));
@@ -195,6 +197,7 @@ class GitHubWebhookControllerTest extends TestCase
     public function test_closed_and_merged_pull_request_is_accepted(): void
     {
         $repository = Repository::factory()->create();
+        Queue::fake();
 
         $this->sendWebhook($repository, $this->mergedPullRequestPayload())->assertStatus(202);
 
@@ -209,6 +212,7 @@ class GitHubWebhookControllerTest extends TestCase
     public function test_duplicate_delivery_is_acknowledged_without_duplicate_rows(): void
     {
         $repository = Repository::factory()->create();
+        Queue::fake();
         $payload = $this->mergedPullRequestPayload();
 
         $this->sendWebhook($repository, $payload)->assertStatus(202);
@@ -235,6 +239,7 @@ class GitHubWebhookControllerTest extends TestCase
     {
         $secret = 'encrypted-webhook-secret';
         $repository = Repository::factory()->create(['webhook_secret' => $secret]);
+        Queue::fake();
         $storedSecret = DB::table('repositories')->where('id', $repository->id)->value('webhook_secret');
 
         $this->assertNotSame($secret, $storedSecret);
