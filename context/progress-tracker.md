@@ -10,15 +10,15 @@ Update this file after finishing each feature. Work in order. Do not start a fea
 - [x] 02 Repositories (`context/feature-specs/02-repositories.md`)
 - [x] 03 Webhook receiver (`context/feature-specs/03-webhook-receiver.md`)
 - [x] 04 AI summary job (`context/feature-specs/04-ai-summary-job.md`)
-- [ ] 05 Frontend setup, login, repositories page (`context/feature-specs/05-frontend-setup-login-repos.md`)
+- [x] 05 Frontend setup, login, repositories page (`context/feature-specs/05-frontend-setup-login-repos.md`)
 - [ ] 06 Change entries page (`context/feature-specs/06-change-entries-page.md`)
 - [ ] 07 Draft release editor (`context/feature-specs/07-draft-release-editor.md`)
 - [ ] 08 Publish and public changelog (`context/feature-specs/08-publish-and-public-changelog.md`)
 - [ ] 09 Testing and polish (`context/feature-specs/09-testing-and-polish.md`)
 
 ## Current focus
-Feature: 04 complete
-Next action: Feature 05 (frontend setup, login, repositories page).
+Feature: 05 complete
+Next action: Feature 06 (change entries page).
 
 ## Notes per feature
 - Feature 01: Laravel 13.39 API with Sanctum 4.3 token authentication, PostgreSQL, and the database queue driver.
@@ -33,6 +33,8 @@ Next action: Feature 05 (frontend setup, login, repositories page).
 - Feature 03 verification: 19 focused tests passed with 59 assertions, covering a signature over formatted raw JSON, valid and invalid signatures, duplicate deliveries, closed-but-not-merged PRs, ping, and no queued AI work. The full suite passed with 43 tests and 190 assertions; Pint and diff checks passed.
 - Feature 04: Added the Gemini-backed summarizer, GitHub changed-file lookup with an empty-list fallback, queued summary job with three tries and backoff, and authenticated retry endpoint for failed entries. AI output is validated before category and summary are saved; the original provider response is retained as jsonb.
 - Feature 04 verification: 26 focused AI job and webhook tests passed with 82 assertions. The full backend suite passed with 50 tests and 213 assertions; Pint passed.
+- Feature 05: Created the React, TypeScript, Vite and Tailwind frontend with login/register, token persistence and `/me` restoration, protected `/repos`, and repository list/create/delete with webhook setup details and copy actions.
+- Feature 05 verification: `npm run build` passed (TypeScript project build and Vite production bundle).
 
 ## Decisions log
 | Date | Decision | Why |
@@ -49,6 +51,8 @@ Next action: Feature 05 (frontend setup, login, repositories page).
 | 2026-10-31 | GitHub webhook signatures are checked against the routed repository's decrypted secret before payload handling | Prevents a repository ID alone or another repository's secret from authenticating an event |
 | 2026-10-31 | Pull request insertion and its pending change entry happen in one transaction, with unique delivery and repository/PR indexes | Retries and concurrent deliveries cannot create duplicate records or a PR without its entry |
 | 2026-11-01 | Gemini is the single AI provider; its endpoint, model, key header, and request/response format live in `SummarizerService` | Provider changes stay localized and do not add a dependency |
+| 2026-11-01 | The frontend stores the Sanctum bearer token in localStorage and reloads the user from `/api/me` | Keeps MVP authentication simple and restores identity after refresh; scripts running on the page can read localStorage |
+| 2026-11-01 | The frontend API base defaults to `http://localhost:8000/api` and can be overridden with `VITE_API_URL` | Matches the configured local Laravel CORS origin and keeps environments configurable |
 
 ## Known issues / ideas for later
 - (empty)
