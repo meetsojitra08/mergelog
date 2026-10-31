@@ -8,7 +8,7 @@ Update this file after finishing each feature. Work in order. Do not start a fea
 ## Features
 - [x] 01 Backend setup and auth (`context/feature-specs/01-backend-setup-and-auth.md`)
 - [x] 02 Repositories (`context/feature-specs/02-repositories.md`)
-- [ ] 03 Webhook receiver (`context/feature-specs/03-webhook-receiver.md`)
+- [x] 03 Webhook receiver (`context/feature-specs/03-webhook-receiver.md`)
 - [ ] 04 AI summary job (`context/feature-specs/04-ai-summary-job.md`)
 - [ ] 05 Frontend setup, login, repositories page (`context/feature-specs/05-frontend-setup-login-repos.md`)
 - [ ] 06 Change entries page (`context/feature-specs/06-change-entries-page.md`)
@@ -17,8 +17,8 @@ Update this file after finishing each feature. Work in order. Do not start a fea
 - [ ] 09 Testing and polish (`context/feature-specs/09-testing-and-polish.md`)
 
 ## Current focus
-Feature: 02 complete
-Next action: wait for direction before starting Feature 03 (Webhook receiver).
+Feature: 03 complete
+Next action: wait for direction before starting Feature 04 (AI summary job).
 
 ## Notes per feature
 - Feature 01: Laravel 13.39 API with Sanctum 4.3 token authentication, PostgreSQL, and the database queue driver.
@@ -29,6 +29,8 @@ Next action: wait for direction before starting Feature 03 (Webhook receiver).
 - Feature 02: Repository list responses omit secrets and tokens; detail/create responses include the webhook URL and secret, never the GitHub token.
 - Feature 02: Repository entry counts are zero until Feature 03 adds change entries.
 - Feature 02 verification: focused tests passed with 9 tests and 65 assertions; full backend suite passed with 20 tests and 117 assertions. Pint and Composer validation passed.
+- Feature 03: Added an unauthenticated, repository-secret-authenticated GitHub webhook endpoint, pull request and change entry schema/models, backed enums, payload validation, and duplicate-safe persistence. AI dispatch remains out of scope until Feature 04.
+- Feature 03 verification: 13 focused tests passed with 38 assertions; full backend suite passed with 33 tests and 155 assertions. Pint, Composer validation, route inspection, and `git diff --check` passed.
 
 ## Decisions log
 | Date | Decision | Why |
@@ -41,6 +43,8 @@ Next action: wait for direction before starting Feature 03 (Webhook receiver).
 | 2026-10-31 | Auth responses include only user id, name, and email | Keeps password and token storage details out of API user data |
 | 2026-10-31 | CORS allows the configured frontend origin without credentials | The frontend authenticates with bearer tokens, not cookies |
 | 2026-10-31 | Repository entry counts return zero until change entries exist | Feature 02 defines the list fields; Feature 03 will introduce the underlying records |
+| 2026-10-31 | GitHub webhook signatures are checked against the routed repository's decrypted secret before payload handling | Prevents a repository ID alone or another repository's secret from authenticating an event |
+| 2026-10-31 | Pull request insertion and its pending change entry happen in one transaction, with unique delivery and repository/PR indexes | Retries and concurrent deliveries cannot create duplicate records or a PR without its entry |
 
 ## Known issues / ideas for later
 - (empty)
