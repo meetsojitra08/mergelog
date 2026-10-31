@@ -121,13 +121,27 @@ class GitHubWebhookController extends Controller
                 return (int) $pullRequestId;
             });
 
-            if ($createdPullRequest !== null) {
-                SummarizePullRequest::dispatch(PullRequest::query()->findOrFail($createdPullRequest));
-            }
+            $pullRequestForJob = $createdPullRequest !== null
+                ? PullRequest::query()->findOrFail($createdPullRequest)
+                : null;
         } catch (Throwable $exception) {
             $this->reportFailure($exception);
 
             return response()->json(['message' => 'Unable to process webhook.'], 500);
+        }
+
+        if ($pullRequestForJob !== null) {
+            try {
+                SummarizePullRequest::dispatch($pullRequestForJob);
+            } catch (Throwable $exception) {
+                ChangeEntry::query()->where('pull_request_id', $createdPullRequest)
+                    ->where('status', ChangeEntryStatus::PendingAi)
+                    ->update([
+                        'status' => ChangeEntryStatus::Failed,
+                        'error_message' => 'Unable to queue summary.',
+                    ]);
+                $this->reportFailure($exception);
+            }
         }
 
         return response()->json(

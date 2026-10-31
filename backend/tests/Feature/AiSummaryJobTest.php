@@ -11,8 +11,12 @@ use App\Models\Repository;
 use App\Models\User;
 use App\Services\GitHubService;
 use App\Services\SummarizerService;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use RuntimeException;
@@ -121,6 +125,52 @@ class AiSummaryJobTest extends TestCase
         );
     }
 
+    public function test_github_file_lookup_collects_all_pages_and_filters_invalid_names(): void
+    {
+        $repository = Repository::factory()->make(['full_name' => 'octocat/hello-world', 'github_token' => 'test-token']);
+        $firstPage = array_fill(0, 100, ['filename' => 'first.php']);
+        $firstPage[0] = ['filename' => ''];
+        Http::preventStrayRequests();
+        Http::fakeSequence('https://api.github.com/repos/octocat/hello-world/pulls/42/files*')
+            ->push($firstPage)
+            ->push(array_fill(0, 100, ['filename' => 'second.php']))
+            ->push([['filename' => 'last.php'], ['filename' => null]]);
+
+        $files = app(GitHubService::class)->getPullRequestFiles($repository, 42);
+
+        $this->assertCount(200, $files);
+        $this->assertSame('first.php', $files[0]);
+        $this->assertSame('second.php', $files[99]);
+        $this->assertSame('last.php', $files[199]);
+        Http::assertSentCount(3);
+        foreach ([1, 2, 3] as $page) {
+            Http::assertSent(function (Request $request) use ($page): bool {
+                parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
+
+                return ($query['per_page'] ?? null) === '100'
+                    && ($query['page'] ?? null) === (string) $page
+                    && $request->hasHeader('Authorization', 'Bearer test-token');
+            });
+        }
+    }
+
+    public function test_github_file_lookup_fails_when_a_later_page_fails(): void
+    {
+        $repository = Repository::factory()->make(['full_name' => 'octocat/hello-world']);
+        Http::preventStrayRequests();
+        Http::fakeSequence('https://api.github.com/repos/octocat/hello-world/pulls/42/files*')
+            ->push(array_fill(0, 100, ['filename' => 'first.php']))
+            ->push(['message' => 'unavailable'], 503);
+
+        try {
+            app(GitHubService::class)->getPullRequestFiles($repository, 42);
+            $this->fail('A failed page should fail the file lookup.');
+        } catch (RuntimeException $exception) {
+            $this->assertSame('GitHub pull request files request failed.', $exception->getMessage());
+        }
+        Http::assertSentCount(2);
+    }
+
     public function test_failed_entry_retry_resets_status_and_dispatches_job(): void
     {
         $user = User::factory()->create();
@@ -155,6 +205,50 @@ class AiSummaryJobTest extends TestCase
             ->assertUnprocessable();
 
         Queue::assertNothingPushed();
+    }
+
+    public function test_retry_does_not_dispatch_when_another_request_claims_the_entry(): void
+    {
+        $user = User::factory()->create();
+        $repository = Repository::factory()->for($user)->create();
+        $pullRequest = PullRequest::factory()->for($repository)->create();
+        $entry = ChangeEntry::factory()->for($pullRequest, 'pullRequest')->create(['status' => ChangeEntryStatus::Failed]);
+        Queue::fake();
+        $claimed = false;
+        DB::listen(function (QueryExecuted $query) use ($entry, &$claimed): void {
+            if (! $claimed && str_starts_with(strtolower($query->sql), 'select') && str_contains($query->sql, 'change_entries')) {
+                $claimed = true;
+                ChangeEntry::query()->whereKey($entry->id)->update(['status' => ChangeEntryStatus::PendingAi]);
+            }
+        });
+
+        $this->actingAs($user, 'sanctum')->postJson('/api/change-entries/'.$entry->id.'/retry')->assertUnprocessable();
+
+        $this->assertTrue($claimed);
+        $this->assertSame(ChangeEntryStatus::PendingAi, $entry->fresh()->status);
+        Queue::assertNothingPushed();
+    }
+
+    public function test_retry_dispatch_failure_restores_failed_state_and_allows_a_later_retry(): void
+    {
+        $user = User::factory()->create();
+        $repository = Repository::factory()->for($user)->create();
+        $pullRequest = PullRequest::factory()->for($repository)->create();
+        $entry = ChangeEntry::factory()->for($pullRequest, 'pullRequest')->create(['status' => ChangeEntryStatus::Failed]);
+        Bus::shouldReceive('dispatch')->once()->andThrow(new RuntimeException('queue unavailable'));
+        Exceptions::fake();
+
+        $this->actingAs($user, 'sanctum')->postJson('/api/change-entries/'.$entry->id.'/retry')->assertStatus(500);
+
+        $this->assertSame(ChangeEntryStatus::Failed, $entry->fresh()->status);
+        $this->assertSame('queue unavailable', $entry->fresh()->error_message);
+        Exceptions::assertReported(RuntimeException::class);
+
+        Bus::fake();
+        $this->actingAs($user, 'sanctum')->postJson('/api/change-entries/'.$entry->id.'/retry')->assertStatus(202);
+        $this->assertSame(ChangeEntryStatus::PendingAi, $entry->fresh()->status);
+        $this->assertNull($entry->fresh()->error_message);
+        Bus::assertDispatched(SummarizePullRequest::class, 1);
     }
 
     public function test_user_cannot_retry_an_entry_from_another_users_repository(): void

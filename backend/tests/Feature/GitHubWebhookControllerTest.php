@@ -9,6 +9,7 @@ use App\Models\PullRequest;
 use App\Models\Repository;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\Queue;
@@ -220,6 +221,25 @@ class GitHubWebhookControllerTest extends TestCase
 
         $this->assertDatabaseCount('pull_requests', 1);
         $this->assertDatabaseCount('change_entries', 1);
+    }
+
+    public function test_dispatch_failure_marks_entry_failed_and_duplicate_delivery_remains_acknowledged(): void
+    {
+        $repository = Repository::factory()->create();
+        Bus::shouldReceive('dispatch')->once()->andThrow(new RuntimeException('queue unavailable'));
+        Exceptions::fake();
+        $payload = $this->mergedPullRequestPayload();
+
+        $this->sendWebhook($repository, $payload)->assertStatus(202);
+        $entry = ChangeEntry::query()->sole();
+        $this->assertSame(ChangeEntryStatus::Failed, $entry->status);
+        $this->assertSame('Unable to queue summary.', $entry->error_message);
+        Exceptions::assertReported(fn (RuntimeException $exception): bool => str_contains($exception->getMessage(), 'Webhook processing failed: RuntimeException'));
+
+        $this->sendWebhook($repository, $payload)->assertOk();
+        $this->assertDatabaseCount('pull_requests', 1);
+        $this->assertDatabaseCount('change_entries', 1);
+        $this->assertSame(ChangeEntryStatus::Failed, $entry->fresh()->status);
     }
 
     public function test_missing_required_pull_request_fields_returns_422(): void
