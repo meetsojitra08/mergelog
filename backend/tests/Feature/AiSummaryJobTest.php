@@ -26,15 +26,17 @@ class AiSummaryJobTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_queued_summary_timeout_is_shorter_than_database_reservation(): void
+    public function test_queued_summary_timeout_covers_file_pages_and_is_shorter_than_reservations(): void
     {
         $entry = $this->pendingEntry();
         $queue = app('queue')->connection('database');
         $queue->push(new SummarizePullRequest($entry->pullRequest));
 
         $payload = json_decode(DB::table('jobs')->sole()->payload, true, 512, JSON_THROW_ON_ERROR);
-        $this->assertGreaterThan(0, $payload['timeout']);
-        $this->assertLessThan(config('queue.connections.database.retry_after'), $payload['timeout']);
+        $this->assertGreaterThan(31 * 10 + 30, $payload['timeout']);
+        foreach (['database', 'beanstalkd', 'redis'] as $connection) {
+            $this->assertLessThan(config("queue.connections.{$connection}.retry_after"), $payload['timeout']);
+        }
     }
 
     public function test_job_saves_validated_ai_summary_and_raw_provider_response(): void

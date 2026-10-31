@@ -36,7 +36,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     let active = true;
-    setLoading(true);
+    if (!currentUser.current) setLoading(true);
     setSessionError(null);
     api.me(token)
       .then((currentUser) => {
@@ -61,7 +61,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [token, retryCount]);
 
   function retrySession(): void {
-    setLoading(true);
+    if (!currentUser.current) setLoading(true);
     setSessionError(null);
     setRetryCount((count) => count + 1);
   }
